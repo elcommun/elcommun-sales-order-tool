@@ -191,7 +191,7 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
         <div class="rule-card c3">
           <div class="rule-card-badge">仮1ロット</div>
           <div class="rule-card-title">✍️ 在庫0が続く商品</div>
-          <div class="rule-card-desc">在庫0で販売が長く止まっている商品は正確な予測ができないため、仮で1ロットを発注数に入れ、備考に「自動計算不可・仮1ロット」と記載します。必要に応じて数を調整してください。</div>
+          <div class="rule-card-desc">在庫が0になってから一定日数以上経過した商品（最終販売日から推定）は正確な予測ができないため、仮で1ロットを発注数に入れ、備考に「自動計算不可・仮1ロット」と記載します。必要に応じて数を調整してください。</div>
         </div>
       </div>
     </div>
@@ -260,9 +260,9 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
         <span>📅 予測日数：今後</span>
         <input type="number" id="forecastDays" value="7" min="1" max="60">
         <span>日分の販売数を発注</span>
-        <span style="margin-left:16px;">✍️ 仮1ロット扱いの判定：在庫0のまま</span>
+        <span style="margin-left:16px;">✍️ 仮1ロット扱いの判定：在庫が0になってから</span>
         <input type="number" id="staleDays" value="7" min="1" max="60">
-        <span>日以上販売が止まっている商品</span>
+        <span>日以上経過した商品（最終販売日から推定）</span>
       </div>
       <button class="primary-btn" id="actionBtn" disabled onclick="doGenerate()">
         <span id="actionBtnLabel">📈 発注書Excelを生成する</span>
@@ -706,7 +706,8 @@ function _doGenerateMain() {
     const adj = calcAdjustedAvg(records, currentStock, minT, maxT, periodDays);
     const forecast = adj.avgPerDay * forecastDays;
 
-    // 要個別入力判定：在庫0のまま staleDays 日以上販売が止まっている（or 販売実績ゼロで在庫0）
+    // 仮1ロット判定：在庫が0になってから staleDays 日以上経過している商品
+    // （在庫履歴は無いため、現在庫0の商品は「最終販売日＝在庫が0になった日」とみなして推定。販売実績が無い在庫0商品も対象）
     const daysSinceLastSale = adj.lastSaleT ? endDay - Math.floor(adj.lastSaleT / 86400000) : Infinity;
     const isManual = currentStock <= 0 && daysSinceLastSale >= staleDays;
 
