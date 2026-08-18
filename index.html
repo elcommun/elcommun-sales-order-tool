@@ -681,9 +681,8 @@ function _doGenerateMain() {
 
   let needOrder = 0, skipOk = 0, haibanCount = 0, notFound = 0, manualCount = 0;
 
-  // 対象品番：在庫CSVと注文データの両方の品番を統合（販売はあったが在庫リストに無い品番も見えるように）
-  const allCodes = new Set([...csvData.stockMap.keys(), ...salesMap.keys()]);
-  const sorted = [...allCodes].sort((a, b) => a.localeCompare(b));
+  // 対象品番：在庫CSVに含まれる品番のみ（発注対象は在庫CSVベース）
+  const sorted = [...csvData.stockMap.keys()].sort((a, b) => a.localeCompare(b));
 
   const endDay = Math.floor(maxT / 86400000);
 
