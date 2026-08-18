@@ -181,7 +181,7 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
         <div class="rule-card c1">
           <div class="rule-card-badge">基本の計算</div>
           <div class="rule-card-title">📈 販売ペース × 7日</div>
-          <div class="rule-card-desc">注文データの期間（注文日時の最初〜最後）から1日あたりの販売数を計算し、7日分を予測。そこから現在庫を引いた不足分を、ロット単位に切り上げて発注します。</div>
+          <div class="rule-card-desc">注文データの期間（注文日時の最初〜最後）から1日あたりの販売数を計算し、7日分を予測。そこから現在庫を引いた不足分を、ロット単位に切り上げて発注します。発注書作成ツールと共通の閾値ルール（品番個別・キーワード）も評価し、大きい方の発注数を採用します。</div>
         </div>
         <div class="rule-card c2">
           <div class="rule-card-badge">欠品補正</div>
@@ -319,6 +319,263 @@ function resolvePartCode(rawPn) {
     return result;
   }
   return null;
+}
+
+
+// =====================================================
+// 発注ルール（発注書作成ツールと共通の閾値ルール。更新時は両ツールに反映すること）
+// =====================================================
+const INIT_EXACT_RULES = [
+  { hinban: 'CLB-203', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-205', threshold: 10, orderQty: 10 },
+  { hinban: 'CLB-210', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-213', threshold: 3,  orderQty: 4  },
+  { hinban: 'CLB-214', threshold: 20, orderQty: 20 },
+  { hinban: 'CLB-218', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-221', threshold: 10, orderQty: 10 },
+  { hinban: 'CLB-222', threshold: 10, orderQty: 10 },
+  { hinban: 'CLB-225', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-226', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-229', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-230', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-231', threshold: 2,  orderQty: 4  },
+  { hinban: 'CLB-232', threshold: 3,  orderQty: 10 },
+  { hinban: 'CLB-233', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-402', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-404', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-405', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-410', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-413', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-414', threshold: 2,  orderQty: 4  },
+  { hinban: 'CLB-415', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-416', threshold: 3,  orderQty: 2  },
+  { hinban: 'CLB-417', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-418', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-419', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-420', threshold: 8,  orderQty: 6  },
+  { hinban: 'CLB-421', threshold: 3,  orderQty: 2  },
+  { hinban: 'CLB-422', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-423', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-424', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-425', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-426', threshold: 4,  orderQty: 2  },
+  { hinban: 'CLB-428', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-429', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-430', threshold: 4,  orderQty: 2  },
+  { hinban: 'CLB-431', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-432', threshold: 8,  orderQty: 6  },
+  { hinban: 'CLB-433', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-702', threshold: 2,  orderQty: 4  },
+  { hinban: 'CLB-703', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-710', threshold: 4,  orderQty: 2  },
+  { hinban: 'CLB-713', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-714', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-718', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-719', threshold: 2,  orderQty: 2  },
+  { hinban: 'CLB-722', threshold: 4,  orderQty: 2  },
+  { hinban: 'CLB-729', threshold: 1,  orderQty: 2  },
+  { hinban: 'CLB-730', threshold: 5,  orderQty: 4  },
+  { hinban: 'CLB-731', threshold: 4,  orderQty: 4  },
+  { hinban: 'CLB-732', threshold: 5,  orderQty: 6  },
+  { hinban: 'CLB-733', threshold: 2,  orderQty: 4  },
+  { hinban: 'CTB-014', threshold: 6,  orderQty: 8  },
+  { hinban: 'CTB-032', threshold: 2,  orderQty: 2  },
+  { hinban: 'EBA-604', threshold: 4,  orderQty: 4  },
+  { hinban: 'FLS-001', threshold: 4,  orderQty: 10  },
+  { hinban: 'LNC-318', threshold: 2,  orderQty: 2  },
+  { hinban: 'LNC-319', threshold: 4,  orderQty: 2  },
+  { hinban: 'LNC-320', threshold: 6,  orderQty: 6  },
+  { hinban: 'LNC-321', threshold: 20,  orderQty: 20  },
+  { hinban: 'LNC-322', threshold: 2,  orderQty: 2  },
+  { hinban: 'LNC-323', threshold: 1,  orderQty: 2  },
+  { hinban: 'LNC-311', threshold: 20,  orderQty: 20  },
+  { hinban: 'LNC-312', threshold: 3,  orderQty: 4  },
+  { hinban: 'LNC-313', threshold: 20,  orderQty: 26  },
+  { hinban: 'LNC-314', threshold: 10,  orderQty: 10  },
+  { hinban: 'LNC-315', threshold: 4,  orderQty: 4  },
+  { hinban: 'LNC-317', threshold: 2,  orderQty: 2  },
+  { hinban: 'MPD-002', threshold: 10,  orderQty: 6  },
+  { hinban: 'MPD-003', threshold: 4,  orderQty: 4  },
+  { hinban: 'MPD-004', threshold: 4,  orderQty: 4  },
+  { hinban: 'MPD-005', threshold: 4,  orderQty: 4  },
+  { hinban: 'MPD-006', threshold: 4,  orderQty: 4  },
+  { hinban: 'MPD-007', threshold: 4,  orderQty: 4  },
+  { hinban: 'MPD-010', threshold: 4,  orderQty: 4  },
+  { hinban: 'MPD-011', threshold: 4,  orderQty: 4  },
+  { hinban: 'MPD-012', threshold: 4,  orderQty: 4  },
+  { hinban: 'MSJ-004', threshold: 10,  orderQty: 10  },
+  { hinban: 'MSJ-005', threshold: 10,  orderQty: 10  },
+  { hinban: 'MSJ-006', threshold: 4,  orderQty: 4  },
+  { hinban: 'MTP-001', threshold: 10,  orderQty: 12  },
+  { hinban: 'MTP-002', threshold: 10,  orderQty: 6  },
+  { hinban: 'MTP-003', threshold: 10,  orderQty: 6  },
+  { hinban: 'MTP-004', threshold: 10,  orderQty: 6  },
+  { hinban: 'MTP-005', threshold: 2,  orderQty: 6  },
+  { hinban: 'MTP-006', threshold: 3,  orderQty: 6  },
+  { hinban: 'MTP-007', threshold: 4,  orderQty: 6  },
+  { hinban: 'MTP-008', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-001', threshold: 10,  orderQty: 15  },
+  { hinban: 'PBC-002', threshold: 10,  orderQty: 21  },
+  { hinban: 'PBC-003', threshold: 15,  orderQty: 21  },
+  { hinban: 'PBC-004', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-005', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-006', threshold: 30,  orderQty: 30  },
+  { hinban: 'PBC-007', threshold: 10,  orderQty: 15  },
+  { hinban: 'PBC-008', threshold: 8,  orderQty: 9  },
+  { hinban: 'PBC-009', threshold: 8,  orderQty: 9  },
+  { hinban: 'PBC-010', threshold: 10,  orderQty: 15  },
+  { hinban: 'PBC-011', threshold: 8,  orderQty: 9  },
+  { hinban: 'PBC-012', threshold: 8,  orderQty: 9  },
+  { hinban: 'PBC-013', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-014', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-015', threshold: 10,  orderQty: 15  },
+  { hinban: 'PBC-016', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-017', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-018', threshold: 5,  orderQty: 18  },
+  { hinban: 'PBC-019', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-020', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-021', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-022', threshold: 30,  orderQty: 30  },
+  { hinban: 'PBC-023', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-024', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-025', threshold: 10,  orderQty: 15  },
+  { hinban: 'PBC-026', threshold: 21,  orderQty: 30  },
+  { hinban: '5A-CE-050', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-051', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-052', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-053', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-054', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-055', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-056', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-057', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-058', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-059', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-060', threshold: 0, orderQty: 2  },
+  { hinban: '5A-CE-061', threshold: 0, orderQty: 2  },
+  { hinban: 'PPC-084', threshold: 2, orderQty: 2  },
+  { hinban: 'CTM-033', threshold: 2,  orderQty: 2  },
+  { hinban: 'CTM-036', threshold: 1,  orderQty: 2  },
+  { hinban: 'CTM-037', threshold: 1,  orderQty: 2  },
+  { hinban: 'CTM-038', threshold: 1,  orderQty: 2  },
+  { hinban: 'GLC-016', threshold: 1,  orderQty: 2  },
+  { hinban: 'JYX-003', threshold: 1,  orderQty: 5  },
+  { hinban: 'JYX-005', threshold: 1,  orderQty: 5  },
+  { hinban: 'JYX-018', threshold: 1,  orderQty: 5  },
+  { hinban: 'PPC-044', threshold: 1,  orderQty: 2  },
+  { hinban: 'PPC-048', threshold: 1,  orderQty: 2  },
+  { hinban: 'PPC-051', threshold: 1,  orderQty: 2  },
+  { hinban: 'PPC-067', threshold: 1,  orderQty: 2  },
+  { hinban: 'SVT-001', threshold: 50, orderQty: 40 },
+  { hinban: 'SVT-002', threshold: 10, orderQty: 20 },
+  { hinban: 'SVT-003', threshold: 10, orderQty: 20 },
+  { hinban: 'SVT-004', threshold: 15, orderQty: 40 },
+  { hinban: 'SVT-005', threshold: 10, orderQty: 20 },
+  { hinban: 'SVT-006', threshold: 20, orderQty: 50 },
+  { hinban: 'SVT-101', threshold: 20, orderQty: 20 },
+  { hinban: 'SVT-104', threshold: 10, orderQty: 20 },
+  { hinban: 'SVT-106', threshold: 10, orderQty: 10 },
+  { hinban: 'SVT-204', threshold: 10, orderQty: 10 },
+  { hinban: 'SVT-206', threshold: 10, orderQty: 20 },
+  { hinban: 'MOF-011', threshold: 1, orderQty: 10 },
+  { hinban: 'PNT-001', threshold: 1, orderQty: 1  },
+  { hinban: 'PNT-002', threshold: 1, orderQty: 1  },
+  { hinban: 'PNT-003', threshold: 4, orderQty: 10 },
+  { hinban: 'PPC-066', threshold: 2, orderQty: 2  },
+  { hinban: 'PPC-083', threshold: 2, orderQty: 2  },
+  { hinban: 'FC-32',   threshold: 2, orderQty: 2  },
+  { hinban: 'GLC-007', threshold: 2, orderQty: 2  },
+  { hinban: 'JYX-027', threshold: 3, orderQty: 5  },
+  { hinban: 'LTS-009', threshold: 2, orderQty: 5  },
+  { hinban: 'LTS-043', threshold: 2, orderQty: 5  },
+  { hinban: 'LTS-047', threshold: 2, orderQty: 5  },
+  { hinban: 'CPC-032', threshold: 2, orderQty: 2  },
+  { hinban: 'EGP-051', threshold: 2, orderQty: 5  },
+  { hinban: 'EGP-052', threshold: 2, orderQty: 5  },
+  { hinban: 'EGP-071', threshold: 2, orderQty: 2  },
+  { hinban: 'EGP-072', threshold: 2, orderQty: 2  },
+  { hinban: 'ALA-501', threshold: 1, orderQty: 6  },
+  { hinban: 'ALA-508', threshold: 1, orderQty: 6  },
+  { hinban: 'ALA-506', threshold: 1, orderQty: 6  },
+  { hinban: 'ALA-507', threshold: 1, orderQty: 6  },
+  { hinban: 'ALA-504', threshold: 1, orderQty: 6  },
+  { hinban: 'ALA-505', threshold: 1, orderQty: 6  },
+  { hinban: 'CLB-721', threshold: 2, orderQty: 2  },
+  { hinban: 'CLB-723', threshold: 2, orderQty: 2  },
+  { hinban: 'CLB-724', threshold: 2, orderQty: 2  },
+  { hinban: 'PBC-027', threshold: 10,  orderQty: 15  },
+  { hinban: 'PBC-028', threshold: 8,  orderQty: 9  },
+  { hinban: 'PBC-029', threshold: 3,  orderQty: 6  },
+  { hinban: 'PBC-030', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-031', threshold: 8,  orderQty: 9  },
+  { hinban: 'PBC-032', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-033', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-034', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-035', threshold: 6,  orderQty: 6  },
+  { hinban: 'PBC-036', threshold: 6,  orderQty: 6  },
+  { hinban: 'PRT-003', threshold: 2,  orderQty: 4  },
+  { hinban: 'PRT-201', threshold: 10,  orderQty: 27  },
+  { hinban: 'PRT-202', threshold: 10,  orderQty: 27  },
+  { hinban: 'PRT-203', threshold: 10,  orderQty: 27  },
+  { hinban: 'PRT-301', threshold: 4,  orderQty: 4  },
+  { hinban: 'PRT-302', threshold: 2,  orderQty: 2  },
+  { hinban: 'PRT-303', threshold: 1,  orderQty: 2  },
+  { hinban: 'SJK-001', threshold: 4,  orderQty: 5  },
+  { hinban: 'SJK-003', threshold: 4,  orderQty: 5  },
+  { hinban: 'SJK-007', threshold: 4,  orderQty: 5  },
+  { hinban: 'SJK-008', threshold: 4,  orderQty: 5  },
+  { hinban: 'SGR-002', threshold: 1,  orderQty: 5  },
+  { hinban: 'SGR-005', threshold: 1,  orderQty: 5  },
+  { hinban: 'STP-001', threshold: 6,  orderQty: 15  },
+  { hinban: 'STP-002', threshold: 3,  orderQty: 3  },
+  { hinban: 'STP-004', threshold: 2,  orderQty: 3  },
+  { hinban: 'STP-005', threshold: 2,  orderQty: 3  },
+  { hinban: 'STP-008', threshold: 3,  orderQty: 3  },
+  { hinban: 'STP-010', threshold: 2,  orderQty: 3  },
+  { hinban: 'STP-011', threshold: 2,  orderQty: 3  },
+  { hinban: 'STP-012', threshold: 2,  orderQty: 3  },
+  { hinban: 'STP-014', threshold: 2,  orderQty: 3  },
+  { hinban: 'PPC-068', threshold: 1,  orderQty: 4  },
+  { hinban: 'CLB-811', threshold: 2,  orderQty: 4  },
+  { hinban: 'CLB-817', threshold: 0,  orderQty: 4  },
+  { hinban: 'GLC-012', threshold: 2,  orderQty: 4  },
+  { hinban: 'LTS-010', threshold: 5,  orderQty: 15 },
+  { hinban: 'BMK-017', threshold: 10, orderQty: 10 },
+  { hinban: 'JYX-004', threshold: 3,  orderQty: 5  },
+  { hinban: 'JYX-006', threshold: 3,  orderQty: 5  },
+  { hinban: 'JYX-031', threshold: 3,  orderQty: 5  },
+  { hinban: 'JYX-032', threshold: 3,  orderQty: 5  },
+  { hinban: 'JYX-035', threshold: 3,  orderQty: 5  },
+];
+const INIT_HINMEI_RULES = [
+  { keyword: 'ミニカード', threshold: 1 },
+  { keyword: 'ペンケース', threshold: 2 },
+];
+const INIT_HINBAN_RULES = [
+  { keyword: 'ECL-', threshold: 3 },
+  { keyword: 'LLN-', threshold: 3 },
+  { keyword: 'NBA-', threshold: 1 },
+  { keyword: 'BBC-', threshold: 5 },
+  { keyword: 'BMK-', threshold: 5 },
+];
+const EXACT_RULE_MAP = new Map();
+INIT_EXACT_RULES.forEach(r => {
+  if (!EXACT_RULE_MAP.has(r.hinban) || r.threshold > EXACT_RULE_MAP.get(r.hinban).threshold)
+    EXACT_RULE_MAP.set(r.hinban, r);
+});
+
+/**
+ * 閾値ルール評価：現在庫がルールの閾値以下なら発注数を返す（該当なしは0）
+ */
+function evalThresholdRules(partCode, hinmei, currentStock, lotNum) {
+  const ex = EXACT_RULE_MAP.get(partCode);
+  if (ex && currentStock <= ex.threshold) return ex.orderQty;
+  let best = -1;
+  for (const r of INIT_HINMEI_RULES)
+    if (hinmei.includes(r.keyword) && r.threshold > best) best = r.threshold;
+  for (const r of INIT_HINBAN_RULES)
+    if (partCode.includes(r.keyword) && r.threshold > best) best = r.threshold;
+  if (best >= 0 && currentStock <= best) return lotNum;
+  return 0;
 }
 
 // =====================================================
@@ -719,22 +976,28 @@ function _doGenerateMain() {
 
     if (haiban) haibanCount++;
 
+    // 閾値ルール（発注書作成ツールと共通）：在庫が閾値以下ならルール発注数
+    const ruleQty = evalThresholdRules(partCode, hinmei, currentStock, lotNum);
+
     let orderQty;
     if (isManual) {
-      // 在庫0が続き予測できない商品：デフォルトで1ロットを入れておく（備考で明示）
+      // 在庫0が続き予測できない商品：デフォルトで1ロット（ルール発注数がある場合は大きい方）
       manualCount++;
-      orderQty = lotNum;
+      orderQty = Math.max(lotNum, ruleQty);
       log(`✍️ 仮発注: ${partCode}  在庫:0  最終販売から${isFinite(daysSinceLastSale) ? daysSinceLastSale + '日' : '販売実績なし'} → 仮1ロット(${orderQty}個)${haiban ? '【廃番】' : ''}`, 'log-purple');
     } else {
-      // 発注数 = 予測 − 現在庫 をロット単位に切り上げ
+      // 販売予測ベース：予測 − 現在庫 をロット単位に切り上げ
       const shortage = forecast - currentStock;
-      if (shortage <= 0) {
+      const forecastQty = shortage > 0 ? Math.ceil(shortage / lotNum) * lotNum : 0;
+      // 予測ベースとルールベースの大きい方を採用
+      orderQty = Math.max(forecastQty, ruleQty);
+      if (orderQty <= 0) {
         skipOk++;
         log(`✅ 充足: ${partCode}  在庫:${currentStock} ≥ 予測:${forecast.toFixed(1)}（日販${adj.avgPerDay.toFixed(2)}）`, 'log-ok');
         continue;
       }
-      orderQty = Math.ceil(shortage / lotNum) * lotNum;
-      log(`📦 発注: ${partCode}  在庫:${currentStock} < 予測:${forecast.toFixed(1)} → ${orderQty}個（日販${adj.avgPerDay.toFixed(2)}×${forecastDays}日）${haiban ? '【廃番】' : ''}`,
+      const basis = forecastQty >= ruleQty ? `日販${adj.avgPerDay.toFixed(2)}×${forecastDays}日` : `閾値ルール`;
+      log(`📦 発注: ${partCode}  在庫:${currentStock} → ${orderQty}個（${basis}）${haiban ? '【廃番】' : ''}`,
           (haiban || currentStock <= 0) ? 'log-warn' : 'log-info');
     }
 
