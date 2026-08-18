@@ -136,7 +136,7 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
       <h2>ECプロパー 週次発注ツール（販売実績版）</h2>
       <p>
         GoQ Systemの<strong>注文データCSV</strong>（過去2〜4週間分）から商品ごとの販売ペースを自動計算し、<strong>今後1週間で売れる数</strong>を予測して発注書を作成します。<br>
-        欠品していた期間は平均計算から自動で除外。在庫が0のまま動いていない商品は<strong>「要個別入力」</strong>として発注書上に明示します。
+        欠品していた期間は平均計算から自動で除外。在庫が0のまま動いていない商品は<strong>仮で1ロット</strong>を入れ、備考でわかるように明示します。
       </p>
     </div>
   </div>
@@ -189,9 +189,9 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
           <div class="rule-card-desc">よく売れている商品の販売が途中で長期間止まっている場合、欠品とみなしてその期間を平均計算の分母から除外。現在庫0の商品は最終販売日以降も除外します（除外は期間の最大70%まで）。</div>
         </div>
         <div class="rule-card c3">
-          <div class="rule-card-badge">要個別入力</div>
+          <div class="rule-card-badge">仮1ロット</div>
           <div class="rule-card-title">✍️ 在庫0が続く商品</div>
-          <div class="rule-card-desc">在庫0で販売が長く止まっている商品は正確な予測ができないため、発注数を空欄にして「要個別入力」と明示します。発注書上で手入力してください。</div>
+          <div class="rule-card-desc">在庫0で販売が長く止まっている商品は正確な予測ができないため、仮で1ロットを発注数に入れ、備考に「自動計算不可・仮1ロット」と記載します。必要に応じて数を調整してください。</div>
         </div>
       </div>
     </div>
@@ -260,7 +260,7 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
         <span>📅 予測日数：今後</span>
         <input type="number" id="forecastDays" value="7" min="1" max="60">
         <span>日分の販売数を発注</span>
-        <span style="margin-left:16px;">✍️ 要個別入力の判定：在庫0のまま</span>
+        <span style="margin-left:16px;">✍️ 仮1ロット扱いの判定：在庫0のまま</span>
         <input type="number" id="staleDays" value="7" min="1" max="60">
         <span>日以上販売が止まっている商品</span>
       </div>
@@ -676,8 +676,7 @@ function _doGenerateMain() {
   log('──────────────────────────────', 'log-sep');
 
   const wb = XLSX.utils.book_new();
-  const orderRows = [['品番','品名','上代','現在庫','ロット','期間販売数','有効日数','日販','予測(' + forecastDays + '日)','発注数','備考']];
-  const manualRows = [];  // 要個別入力
+  const orderRows = [['品番','品名','上代','現在庫','ロット','発注数','備考']];
   const notFoundList = [];
 
   let needOrder = 0, skipOk = 0, haibanCount = 0, notFound = 0, manualCount = 0;
@@ -711,62 +710,44 @@ function _doGenerateMain() {
     const daysSinceLastSale = adj.lastSaleT ? endDay - Math.floor(adj.lastSaleT / 86400000) : Infinity;
     const isManual = currentStock <= 0 && daysSinceLastSale >= staleDays;
 
-    // 備考
+    // 備考：在庫切れ・廃番のみ（＋自動計算できなかった商品の目印）
     const bikoParts = [];
     if (haiban) { bikoParts.push('廃番'); }
     if (currentStock <= 0) bikoParts.push('在庫切れ');
-    if (adj.gapNote) bikoParts.push(adj.gapNote);
-    if (isManual) bikoParts.push('要個別入力');
+    if (isManual) bikoParts.push('自動計算不可・仮1ロット');
     const biko = bikoParts.join('＋');
 
     if (haiban) haibanCount++;
 
+    let orderQty;
     if (isManual) {
-      // 発注数は空欄。要個別入力として明示
+      // 在庫0が続き予測できない商品：デフォルトで1ロットを入れておく（備考で明示）
       manualCount++;
-      manualRows.push([
-        partCode, hinmei, jodai, currentStock, lotNum,
-        adj.totalQty, Math.round(adj.effectiveDays * 10) / 10,
-        Math.round(adj.avgPerDay * 100) / 100, Math.round(forecast * 10) / 10,
-        '', biko
-      ]);
-      log(`✍️ 要個別入力: ${partCode}  在庫:0  最終販売から${isFinite(daysSinceLastSale) ? daysSinceLastSale + '日' : '販売実績なし'}${haiban ? '【廃番】' : ''}`, 'log-purple');
-      continue;
+      orderQty = lotNum;
+      log(`✍️ 仮発注: ${partCode}  在庫:0  最終販売から${isFinite(daysSinceLastSale) ? daysSinceLastSale + '日' : '販売実績なし'} → 仮1ロット(${orderQty}個)${haiban ? '【廃番】' : ''}`, 'log-purple');
+    } else {
+      // 発注数 = 予測 − 現在庫 をロット単位に切り上げ
+      const shortage = forecast - currentStock;
+      if (shortage <= 0) {
+        skipOk++;
+        log(`✅ 充足: ${partCode}  在庫:${currentStock} ≥ 予測:${forecast.toFixed(1)}（日販${adj.avgPerDay.toFixed(2)}）`, 'log-ok');
+        continue;
+      }
+      orderQty = Math.ceil(shortage / lotNum) * lotNum;
+      log(`📦 発注: ${partCode}  在庫:${currentStock} < 予測:${forecast.toFixed(1)} → ${orderQty}個（日販${adj.avgPerDay.toFixed(2)}×${forecastDays}日）${haiban ? '【廃番】' : ''}`,
+          (haiban || currentStock <= 0) ? 'log-warn' : 'log-info');
     }
-
-    // 発注数 = 予測 − 現在庫 をロット単位に切り上げ
-    const shortage = forecast - currentStock;
-    if (shortage <= 0) {
-      skipOk++;
-      log(`✅ 充足: ${partCode}  在庫:${currentStock} ≥ 予測:${forecast.toFixed(1)}（日販${adj.avgPerDay.toFixed(2)}）`, 'log-ok');
-      continue;
-    }
-    const orderQty = Math.ceil(shortage / lotNum) * lotNum;
 
     needOrder++;
-    orderRows.push([
-      partCode, hinmei, jodai, currentStock, lotNum,
-      adj.totalQty, Math.round(adj.effectiveDays * 10) / 10,
-      Math.round(adj.avgPerDay * 100) / 100, Math.round(forecast * 10) / 10,
-      orderQty, biko
-    ]);
-    log(`📦 発注: ${partCode}  在庫:${currentStock} < 予測:${forecast.toFixed(1)} → ${orderQty}個（日販${adj.avgPerDay.toFixed(2)}×${forecastDays}日${adj.gapNote ? '・' + adj.gapNote : ''}）${haiban ? '【廃番】' : ''}`,
-        (haiban || currentStock <= 0) ? 'log-warn' : 'log-info');
-  }
-
-  // 要個別入力行を発注書の末尾にまとめて追加
-  if (manualRows.length) {
-    orderRows.push(['','','','','','','','','','','']);
-    orderRows.push(['▼ 要個別入力（在庫0が続いており自動予測不可。発注数を手入力してください）','','','','','','','','','','']);
-    manualRows.forEach(r => orderRows.push(r));
+    orderRows.push([partCode, hinmei, jodai, currentStock, lotNum, orderQty, biko]);
   }
 
   log('──────────────────────────────', 'log-sep');
-  log(`📊 完了 | 発注:${needOrder} / 要個別入力:${manualCount} / 充足:${skipOk} / 廃番:${haibanCount} / 未発見:${notFound}`, 'log-info');
+  log(`📊 完了 | 発注:${needOrder}（うち仮1ロット:${manualCount}）/ 充足:${skipOk} / 廃番:${haibanCount} / 未発見:${notFound}`, 'log-info');
 
   // 発注書シート
   const wsOrder = XLSX.utils.aoa_to_sheet(orderRows);
-  wsOrder['!cols'] = [{wch:18},{wch:26},{wch:8},{wch:9},{wch:7},{wch:11},{wch:9},{wch:8},{wch:11},{wch:9},{wch:26}];
+  wsOrder['!cols'] = [{wch:18},{wch:30},{wch:8},{wch:9},{wch:7},{wch:9},{wch:24}];
   XLSX.utils.book_append_sheet(wb, wsOrder, '発注書');
 
   // 未発見シート
@@ -787,7 +768,7 @@ function _doGenerateMain() {
   document.getElementById('statsGrid').innerHTML = `
     <div class="stat"><div class="num">${sorted.length}</div><div class="label">対象品番数</div></div>
     <div class="stat"><div class="num" style="color:var(--red)">${needOrder}</div><div class="label">発注必要</div></div>
-    <div class="stat"><div class="num" style="color:var(--purple)">${manualCount}</div><div class="label">要個別入力</div></div>
+    <div class="stat"><div class="num" style="color:var(--purple)">${manualCount}</div><div class="label">仮1ロット</div></div>
     <div class="stat"><div class="num" style="color:var(--green)">${skipOk}</div><div class="label">在庫充足</div></div>
     <div class="stat"><div class="num">${haibanCount}</div><div class="label">廃番品</div></div>
   `;
