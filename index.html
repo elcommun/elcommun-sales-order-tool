@@ -955,7 +955,8 @@ function _doGenerateMain() {
       continue;
     }
 
-    const { lot, haiban, hinmei, jodai } = prod;
+    const { lot, hinmei, jodai } = prod;
+    const haiban = /^MSJ-/.test(partCode) ? '' : prod.haiban; // MSJ-系は廃番扱いしない
     const lotNum = lot > 0 ? lot : 1;
     const records = salesMap.get(partCode) || [];
 
