@@ -136,7 +136,7 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
       <h2>ECプロパー 週次発注ツール（販売実績版）</h2>
       <p>
         GoQ Systemの<strong>注文データCSV</strong>（過去2〜4週間分）から商品ごとの販売ペースを自動計算し、<strong>今後1週間で売れる数</strong>を予測して発注書を作成します。<br>
-        欠品していた期間は平均計算から自動で除外。在庫が0のまま動いていない商品は<strong>仮で1ロット</strong>を入れ、備考でわかるように明示します。
+        欠品していた期間は平均計算から自動で除外。長期欠品の商品は<strong>個別ルールまたは仮1ロット</strong>を入れ、備考でわかるように明示します。
       </p>
     </div>
   </div>
@@ -181,7 +181,7 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
         <div class="rule-card c1">
           <div class="rule-card-badge">基本の計算</div>
           <div class="rule-card-title">📈 販売ペース × 7日</div>
-          <div class="rule-card-desc">注文データの期間（注文日時の最初〜最後）から1日あたりの販売数を計算し、7日分を予測。そこから現在庫を引いた不足分を、ロット単位に切り上げて発注します。発注書作成ツールと共通の閾値ルール（品番個別・キーワード）も評価し、大きい方の発注数を採用します。</div>
+          <div class="rule-card-desc">注文データの期間（注文日時の最初〜最後）から1日あたりの販売数を計算し、7日分を予測。そこから現在庫を引いた不足分を、ロット単位に切り上げて発注します。通常商品はこの平均ベースのみで判定します。</div>
         </div>
         <div class="rule-card c2">
           <div class="rule-card-badge">欠品補正</div>
@@ -189,9 +189,9 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
           <div class="rule-card-desc">よく売れている商品の販売が途中で長期間止まっている場合、欠品とみなしてその期間を平均計算の分母から除外。現在庫0の商品は最終販売日以降も除外します（除外は期間の最大70%まで）。</div>
         </div>
         <div class="rule-card c3">
-          <div class="rule-card-badge">仮1ロット</div>
+          <div class="rule-card-badge">長期欠品</div>
           <div class="rule-card-title">✍️ 在庫0が続く商品</div>
-          <div class="rule-card-desc">在庫が0になってから一定日数以上経過した商品（最終販売日から推定）は正確な予測ができないため、仮で1ロットを発注数に入れ、備考に「自動計算不可・仮1ロット」と記載します。必要に応じて数を調整してください。</div>
+          <div class="rule-card-desc">在庫が0になってから一定日数以上経過した商品（最終販売日から推定）は正確な予測ができないため、品番個別ルールがあればその発注数を、なければ仮で1ロットを入れ、備考に「長期欠品・…」と記載します。必要に応じて数を調整してください。</div>
         </div>
       </div>
     </div>
@@ -260,7 +260,7 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
         <span>📅 予測日数：今後</span>
         <input type="number" id="forecastDays" value="7" min="1" max="60">
         <span>日分の販売数を発注</span>
-        <span style="margin-left:16px;">✍️ 仮1ロット扱いの判定：在庫が0になってから</span>
+        <span style="margin-left:16px;">✍️ 長期欠品の判定：在庫が0になってから</span>
         <input type="number" id="staleDays" value="7" min="1" max="60">
         <span>日以上経過した商品（最終販売日から推定）</span>
       </div>
@@ -968,46 +968,48 @@ function _doGenerateMain() {
     const daysSinceLastSale = adj.lastSaleT ? endDay - Math.floor(adj.lastSaleT / 86400000) : Infinity;
     const isManual = currentStock <= 0 && daysSinceLastSale >= staleDays;
 
-    // 備考：在庫切れ・廃番のみ（＋自動計算できなかった商品の目印）
-    const bikoParts = [];
-    if (haiban) { bikoParts.push('廃番'); }
-    if (currentStock <= 0) bikoParts.push('在庫切れ');
-    if (isManual) bikoParts.push('自動計算不可・仮1ロット');
-    const biko = bikoParts.join('＋');
-
     if (haiban) haibanCount++;
 
-    // 閾値ルール（発注書作成ツールと共通）：在庫が閾値以下ならルール発注数
-    const ruleQty = evalThresholdRules(partCode, hinmei, currentStock, lotNum);
-
     let orderQty;
+    let manualNote = '';
     if (isManual) {
-      // 在庫0が続き予測できない商品：デフォルトで1ロット（ルール発注数がある場合は大きい方）
+      // 長期欠品（在庫0が続き予測不可）：個別ルールの発注数があればそれを採用、なければ仮1ロット
       manualCount++;
-      orderQty = Math.max(lotNum, ruleQty);
-      log(`✍️ 仮発注: ${partCode}  在庫:0  最終販売から${isFinite(daysSinceLastSale) ? daysSinceLastSale + '日' : '販売実績なし'} → 仮1ロット(${orderQty}個)${haiban ? '【廃番】' : ''}`, 'log-purple');
+      const ruleQty = evalThresholdRules(partCode, hinmei, currentStock, lotNum);
+      if (ruleQty > 0) {
+        orderQty = ruleQty;
+        manualNote = '長期欠品・個別ルール適用';
+      } else {
+        orderQty = lotNum;
+        manualNote = '長期欠品・仮1ロット';
+      }
+      log(`✍️ 長期欠品: ${partCode}  在庫:0  最終販売から${isFinite(daysSinceLastSale) ? daysSinceLastSale + '日' : '販売実績なし'} → ${orderQty}個（${manualNote}）${haiban ? '【廃番】' : ''}`, 'log-purple');
     } else {
-      // 販売予測ベース：予測 − 現在庫 をロット単位に切り上げ
+      // 通常商品：販売実績の平均ベースのみ（予測 − 現在庫 をロット単位に切り上げ）
       const shortage = forecast - currentStock;
-      const forecastQty = shortage > 0 ? Math.ceil(shortage / lotNum) * lotNum : 0;
-      // 予測ベースとルールベースの大きい方を採用
-      orderQty = Math.max(forecastQty, ruleQty);
+      orderQty = shortage > 0 ? Math.ceil(shortage / lotNum) * lotNum : 0;
       if (orderQty <= 0) {
         skipOk++;
         log(`✅ 充足: ${partCode}  在庫:${currentStock} ≥ 予測:${forecast.toFixed(1)}（日販${adj.avgPerDay.toFixed(2)}）`, 'log-ok');
         continue;
       }
-      const basis = forecastQty >= ruleQty ? `日販${adj.avgPerDay.toFixed(2)}×${forecastDays}日` : `閾値ルール`;
-      log(`📦 発注: ${partCode}  在庫:${currentStock} → ${orderQty}個（${basis}）${haiban ? '【廃番】' : ''}`,
+      log(`📦 発注: ${partCode}  在庫:${currentStock} < 予測:${forecast.toFixed(1)} → ${orderQty}個（日販${adj.avgPerDay.toFixed(2)}×${forecastDays}日）${haiban ? '【廃番】' : ''}`,
           (haiban || currentStock <= 0) ? 'log-warn' : 'log-info');
     }
+
+    // 備考：在庫切れ・廃番のみ（＋長期欠品商品の目印）
+    const bikoParts = [];
+    if (haiban) { bikoParts.push('廃番'); }
+    if (currentStock <= 0) bikoParts.push('在庫切れ');
+    if (manualNote) bikoParts.push(manualNote);
+    const biko = bikoParts.join('＋');
 
     needOrder++;
     orderRows.push([partCode, hinmei, jodai, currentStock, lotNum, orderQty, biko]);
   }
 
   log('──────────────────────────────', 'log-sep');
-  log(`📊 完了 | 発注:${needOrder}（うち仮1ロット:${manualCount}）/ 充足:${skipOk} / 廃番:${haibanCount} / 未発見:${notFound}`, 'log-info');
+  log(`📊 完了 | 発注:${needOrder}（うち長期欠品:${manualCount}）/ 充足:${skipOk} / 廃番:${haibanCount} / 未発見:${notFound}`, 'log-info');
 
   // 発注書シート
   const wsOrder = XLSX.utils.aoa_to_sheet(orderRows);
@@ -1032,7 +1034,7 @@ function _doGenerateMain() {
   document.getElementById('statsGrid').innerHTML = `
     <div class="stat"><div class="num">${sorted.length}</div><div class="label">対象品番数</div></div>
     <div class="stat"><div class="num" style="color:var(--red)">${needOrder}</div><div class="label">発注必要</div></div>
-    <div class="stat"><div class="num" style="color:var(--purple)">${manualCount}</div><div class="label">仮1ロット</div></div>
+    <div class="stat"><div class="num" style="color:var(--purple)">${manualCount}</div><div class="label">長期欠品</div></div>
     <div class="stat"><div class="num" style="color:var(--green)">${skipOk}</div><div class="label">在庫充足</div></div>
     <div class="stat"><div class="num">${haibanCount}</div><div class="label">廃番品</div></div>
   `;
