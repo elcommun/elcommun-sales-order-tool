@@ -1027,7 +1027,7 @@ function _doGenerateMain() {
   }
 
   const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
-  const fname = `${today}-EC週次発注分.xlsx`;
+  const fname = `${today}-EC発注分.xlsx`;
   XLSX.writeFile(wb, fname);
   document.getElementById('dlBtn').onclick = () => XLSX.writeFile(wb, fname);
 
