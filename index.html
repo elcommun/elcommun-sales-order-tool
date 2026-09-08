@@ -276,6 +276,7 @@ header span{font-size:12px;color:var(--gray-400);margin-left:4px;}
     <h3>✅ 発注書の生成が完了しました！</h3>
     <button class="dl-btn" id="dlBtn">⬇️ 発注書をダウンロード</button>
     <div class="stats-grid" id="statsGrid"></div>
+    <div id="notFoundAlert" style="display:none;margin-top:14px;background:var(--red-light);border:1px solid #FECACA;border-radius:8px;padding:14px 18px;text-align:left;font-size:13px;color:#991B1B;line-height:1.8;"></div>
   </div>
 
 </div>
@@ -1037,7 +1038,21 @@ function _doGenerateMain() {
     <div class="stat"><div class="num" style="color:var(--purple)">${manualCount}</div><div class="label">長期欠品</div></div>
     <div class="stat"><div class="num" style="color:var(--green)">${skipOk}</div><div class="label">在庫充足</div></div>
     <div class="stat"><div class="num">${haibanCount}</div><div class="label">廃番品</div></div>
+    <div class="stat"><div class="num" style="color:${notFound ? 'var(--red)' : 'var(--gray-400)'}">${notFound}</div><div class="label">紐づけエラー</div></div>
   `;
+
+  // 紐づけエラー（在庫CSVにあるが商品データに存在しない品番）を画面に表示
+  const alertEl = document.getElementById('notFoundAlert');
+  if (notFoundList.length) {
+    const items = notFoundList.map(({ partCode, currentStock }) => `${esc(partCode)}（在庫:${currentStock}）`).join('、');
+    alertEl.innerHTML = `<strong>⚠️ 商品データに紐づかない品番が ${notFoundList.length} 件あります（発注書には含まれていません）</strong><br>` +
+      `${items}<br>` +
+      `<span style="font-size:12px;">→ 商品データXLSXに品番が未登録か、品番変換の対象外です。詳細はExcelの「未発見商品」シートを確認してください。</span>`;
+    alertEl.style.display = 'block';
+  } else {
+    alertEl.style.display = 'none';
+  }
+
   document.getElementById('resultSection').classList.add('show');
 }
 
